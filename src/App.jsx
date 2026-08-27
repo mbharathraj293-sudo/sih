@@ -45,10 +45,16 @@ const INITIAL_LOGS = [
   { time: '15:54:10', type: 'system', text: 'In-memory telemetry feed ready for IoT/Lidar stream ingestion...' }
 ];
 
-const BACKEND_URL = 'http://localhost:8000';
+const BACKEND_URL = 'http://localhost:8000/api/v1';
 
 export default function App() {
   const [tasks, setTasks] = useState([]);
+  const [sCurveData, setSCurveData] = useState([
+    { week: 'Wk 1', Planned: 20, Actual: 20 },
+    { week: 'Wk 2', Planned: 45, Actual: 45 },
+    { week: 'Wk 3', Planned: 60, Actual: 58 },
+    { week: 'Wk 4', Planned: 68, Actual: 62 }
+  ]);
   const [logs, setLogs] = useState(INITIAL_LOGS);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
@@ -60,14 +66,27 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const terminalEndRef = useRef(null);
 
+  // Fetch S-Curve data
+  const fetchSCurve = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/s-curve`);
+      if (!res.ok) throw new Error('API server returned error status');
+      const data = await res.json();
+      setSCurveData(data);
+    } catch (err) {
+      console.error('Failed to fetch S-curve data:', err);
+    }
+  };
+
   // Fetch WBS schedule from FastAPI backend
   const fetchSchedule = async (silent = false) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/schedule`);
+      const res = await fetch(`${BACKEND_URL}/wbs-tasks`);
       if (!res.ok) throw new Error('API server returned error status');
       const data = await res.json();
       setTasks(data);
       setIsApiConnected(true);
+      await fetchSCurve(); // update S-curve as well
     } catch (err) {
       console.error('Failed to fetch schedule from backend:', err);
       setIsApiConnected(false);
@@ -133,10 +152,15 @@ export default function App() {
     }, 1200);
 
     try {
+      // Create FormData with a simulated File object
+      const formData = new FormData();
+      const fileBlob = new Blob(['Simulated telemetry scan data'], { type: 'text/plain' });
+      formData.append('file', fileBlob, fileName);
+
       // Call FastAPI backend to process data
-      const res = await fetch(`${BACKEND_URL}/process-site-data`, {
+      const res = await fetch(`${BACKEND_URL}/telemetry/ingest`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        body: formData
       });
 
       if (!res.ok) throw new Error('API server returned error during WBS processing');
@@ -157,8 +181,13 @@ export default function App() {
       setIsUploading(false);
       setUploadSuccess(true);
       
-      // Re-fetch the updated schedule state from the backend WBS database
-      await fetchSchedule(true);
+      // Update tasks locally from response
+      if (apiResponse.tasks) {
+        setTasks(apiResponse.tasks);
+      }
+      
+      // Re-fetch the updated S-Curve state
+      await fetchSCurve();
       setShowToast(true);
     } catch (err) {
       clearTimeout(simTimeout1);
@@ -168,7 +197,7 @@ export default function App() {
       const errorTime = new Date().toTimeString().split(' ')[0];
       setLogs(prev => [
         ...prev,
-        { time: errorTime, type: 'system', text: `ERROR: POST request to ${BACKEND_URL}/process-site-data failed. Ingestion pipeline aborted.` }
+        { time: errorTime, type: 'system', text: `ERROR: POST request to ${BACKEND_URL}/telemetry/ingest failed. Ingestion pipeline aborted.` }
       ]);
       setIsUploading(false);
     }
@@ -195,15 +224,54 @@ export default function App() {
     }
   };
 
-  const handleManualNlpParse = () => {
+  const handleManualNlpParse = async () => {
     if (nlpText.trim() === '') return;
     const time = new Date().toTimeString().split(' ')[0];
     setLogs(prev => [
       ...prev,
       { time, type: 'nlp', text: `NLP Manual Log Entry: "${nlpText}"` },
-      { time, type: 'nlp', text: 'NLP_PARSER: Extracting structural tokens and linking to WBS 1.3...' }
+      { time, type: 'nlp', text: 'NLP_PARSER: Extracting structural tokens and linking WBS in backend...' }
     ]);
-    triggerIngestion('manual_telemetry_transcript.txt');
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/nlp-log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: nlpText })
+      });
+
+      if (!res.ok) throw new Error('NLP parsing failed');
+      const apiResponse = await res.json();
+
+      const completeTime = new Date().toTimeString().split(' ')[0];
+      
+      if (apiResponse.matched_wbs_id) {
+        setLogs(prev => [
+          ...prev,
+          { time: completeTime, type: 'success', text: `NLP Alignment Complete: Mapped to ${apiResponse.matched_wbs_id} with ${Math.round(apiResponse.match_confidence * 100)}% confidence.` },
+          { time: completeTime, type: 'json', text: JSON.stringify(apiResponse, null, 2) },
+          { time: completeTime, type: 'system', text: 'PRIMAVERA_BROKER: Recalculating critical path...' },
+          { time: completeTime, type: 'system', text: 'PRIMAVERA_BROKER: Primavera P6 baseline synchronized. Baseline delta successfully updated.' }
+        ]);
+        if (apiResponse.tasks) {
+          setTasks(apiResponse.tasks);
+        }
+        await fetchSCurve(); // Refresh S-curve dynamically!
+        setShowToast(true);
+      } else {
+        setLogs(prev => [
+          ...prev,
+          { time: completeTime, type: 'engine', text: 'NLP_PARSER: No confident WBS activity match found for input log.' }
+        ]);
+      }
+    } catch (err) {
+      console.error('NLP Parse Error:', err);
+      const errorTime = new Date().toTimeString().split(' ')[0];
+      setLogs(prev => [
+        ...prev,
+        { time: errorTime, type: 'system', text: `ERROR: POST request to ${BACKEND_URL}/nlp-log failed.` }
+      ]);
+    }
   };
 
   const resetDemo = async () => {
@@ -239,13 +307,8 @@ export default function App() {
   const scheduleVariance = isPier4Complete ? 'On Schedule' : '-3 Days';
   const activeAnomalies = isPier4Complete ? 2 : 2; // Keep anomaly count constant as requested
 
-  // S-Curve mock dataset tracking over 4 weeks (dynamically updates week 4 based on backend Pier 4 completion)
-  const chartData = [
-    { week: 'Wk 1', Planned: 20, Actual: 20 },
-    { week: 'Wk 2', Planned: 45, Actual: 45 },
-    { week: 'Wk 3', Planned: 60, Actual: 58 },
-    { week: 'Wk 4', Planned: 68, Actual: isPier4Complete ? 72 : 62 }
-  ];
+  // S-Curve mock dataset tracking over 4 weeks (loaded dynamically from backend API)
+  const chartData = sCurveData;
 
   // Helper to get Gantt bar attributes depending on task WBS
   const getGanttLayout = (wbsId, progress) => {
