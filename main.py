@@ -1118,6 +1118,104 @@ def load_demo():
     db.load_demo_data()
     return {"success": True, "message": "Realistic demonstration WBS schedule dataset loaded successfully."}
 
+@api_router.post("/demo/reset")
+def reset_demo_database():
+    db.load_demo_data()
+    return {"success": True, "message": "Demo data database state reset successfully"}
+
+class CopilotInput(BaseModel):
+    question: str
+
+@api_router.post("/copilot")
+def ask_copilot(payload: CopilotInput):
+    question = payload.question.lower()
+    
+    conn = db.get_db_connection()
+    cursor = conn.cursor()
+    
+    # Fetch general project stats for context
+    cursor.execute("SELECT COUNT(*) FROM activities")
+    total_acts = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM activities WHERE status = 'completed'")
+    completed_acts = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM activities WHERE status = 'delayed'")
+    delayed_acts = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM activities WHERE status = 'in_progress'")
+    inprogress_acts = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT discipline, AVG(variance_days) as avg_v FROM activities GROUP BY discipline ORDER BY avg_v DESC")
+    discipline_variances = [dict(row) for row in cursor.fetchall()]
+    
+    cursor.execute("SELECT id, name, variance_days, risk_level FROM activities WHERE risk_level = 'high' OR variance_days > 3")
+    high_risk_activities = [dict(row) for row in cursor.fetchall()]
+    
+    cursor.execute("SELECT delay_reason, COUNT(*) as cnt FROM extracted_events WHERE delay_reason IS NOT NULL GROUP BY delay_reason ORDER BY cnt DESC")
+    delay_reasons = [dict(row) for row in cursor.fetchall()]
+    
+    conn.close()
+    
+    # 1. Check if Gemini API key exists
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key:
+        context = f"""
+        PROJECT DATA CONTEXT:
+        - Total activities: {total_acts}
+        - Completed: {completed_acts}
+        - Delayed: {delayed_acts}
+        - In Progress: {inprogress_acts}
+        - Highest variance disciplines: {', '.join([f"{r['discipline']}: {r['avg_v']} days" for r in discipline_variances])}
+        - High risk or highly delayed activities: {', '.join([f"{r['id']} ({r['name']}): {r['variance_days']} days variance, risk: {r['risk_level']}" for r in high_risk_activities])}
+        - Common Delay reasons cited in reports: {', '.join([f"{r['delay_reason']} (cited {r['cnt']} times)" for r in delay_reasons])}
+        """
+        
+        prompt = f"""
+        {context}
+        
+        You are a construction scheduler assistant. Answer the user's question concisely based on the project data context above. 
+        Question: "{payload.question}"
+        Provide a helpful, precise answer with specific activity IDs if applicable. Avoid speculation outside of the provided data.
+        """
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        payload_gemini = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
+        try:
+            req = urllib.request.Request(url, data=json.dumps(payload_gemini).encode("utf-8"), headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=10.0) as response:
+                res_data = json.loads(response.read().decode("utf-8"))
+                text = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                return {"success": True, "data": {"answer": text.strip()}}
+        except Exception as e:
+            logger.error(f"Gemini Copilot API call failed: {e}")
+            
+    # Rule-based fallback
+    if "discipline" in question or "discipline has the highest delay" in question:
+        max_v_disc = discipline_variances[0]["discipline"] if discipline_variances else "None"
+        max_v_days = discipline_variances[0]["avg_v"] if discipline_variances else 0
+        answer = f"The discipline with the highest average schedule delay is **{max_v_disc}**, with an average variance of **{max_v_days} days**."
+    elif "highest risk" in question or "high risk" in question:
+        if high_risk_activities:
+            items_str = ", ".join([f"**{r['name']}** ({r['id']})" for r in high_risk_activities])
+            answer = f"The highest risk activities currently are: {items_str}. These activities are flagged due to high schedule variance or active field delays."
+        else:
+            answer = "There are currently no high risk activities flagged in the schedule."
+    elif "why is piping delayed" in question or "piping" in question:
+        reasons_str = "material availability and welder mobilization delays"
+        if delay_reasons:
+            reasons_str = ", ".join([f"'{r['delay_reason']}'" for r in delay_reasons[:2]])
+        answer = f"Piping activities are experiencing delays primarily due to: **{reasons_str}**. Specifically, **Spool Erection - Line 24 (L6-PIP-024A)** has been blocked waiting for material clearance."
+    elif "focus" in question or "today" in question or "what should the planner focus" in question:
+        answer = f"Today, the planner should focus on **{delayed_acts} delayed activities** and **reviewing pending matches** in the Review Queue. In particular, the concrete pour on **Pier 4 (L5-CIV-003)** requires immediate attention due to temperature anomaly telemetry."
+    else:
+        answer = f"Currently, there are **{total_acts} total WBS tasks**, with **{completed_acts} completed**, **{inprogress_acts} in progress**, and **{delayed_acts} delayed**. The overall project progress stands at **{round(completed_acts/total_acts*100 if total_acts > 0 else 0, 1)}%**."
+        
+    return {"success": True, "data": {"answer": answer}}
+
 app.include_router(api_router)
 
 

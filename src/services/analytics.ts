@@ -47,26 +47,53 @@ export interface NotificationItem {
 }
 
 export const getAnalytics = async (): Promise<AnalyticsData> => {
-  const { data } = await api.get<AnalyticsData>('/analytics');
+  const { data } = await api.get<AnalyticsData>('/api/v1/analytics');
   return data;
 };
 
 export const getProjectMemory = async (): Promise<ProjectMemoryItem[]> => {
-  const { data } = await api.get<ProjectMemoryItem[]>('/project-memory');
+  const { data } = await api.get<ProjectMemoryItem[]>('/api/v1/project-memory');
   return data;
 };
 
 export const getNotifications = async (): Promise<NotificationItem[]> => {
-  const { data } = await api.get<NotificationItem[]>('/notifications');
+  const { data } = await api.get<NotificationItem[]>('/api/v1/notifications');
   return data;
 };
 
 export const parseNlpLogLegacy = async (text: string): Promise<any> => {
-  const { data } = await api.post('/nlp-log', { text });
+  const { data } = await api.post('/api/v1/nlp-log', { text });
   return data;
 };
 
 export const getSCurveData = async (): Promise<any[]> => {
-  const { data } = await api.get<any[]>('/s-curve');
+  const { data } = await api.get<any[]>('/api/v1/s-curve');
   return data;
+};
+
+export interface AuditLog {
+  id: number;
+  timestamp: string;
+  action_source: string;
+  report_id?: string;
+  activity_id?: string;
+  old_value?: string;
+  new_value?: string;
+  action: string;
+  confidence?: number;
+}
+
+export interface SearchResults {
+  activities: any[];
+  reports: any[];
+}
+
+export const getAuditLogs = async (): Promise<AuditLog[]> => {
+  const { data } = await api.get<{ success: boolean; data: AuditLog[] }>('/api/audit');
+  return data.data;
+};
+
+export const searchProject = async (query: string): Promise<SearchResults> => {
+  const { data } = await api.get<{ success: boolean; data: SearchResults }>(`/api/search?q=${encodeURIComponent(query)}`);
+  return data.data;
 };
