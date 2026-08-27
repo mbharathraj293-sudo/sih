@@ -10,7 +10,7 @@ const getBaseUrl = (): string => {
     // @ts-ignore
     return process.env.VITE_API_BASE_URL;
   }
-  return 'http://localhost:8000/api/v1';
+  return 'http://localhost:8000';
 };
 
 export const API_BASE_URL = getBaseUrl();
