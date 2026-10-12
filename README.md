@@ -1,4 +1,4 @@
-# Syntarx AI: Intelligent Data Capture Dashboard
+# Syntrax: Intelligent Data Capture Dashboard
 
 This project is a high-fidelity, full-stack prototype designed for a construction management hackathon. It features a Python FastAPI backend acting as the Work Breakdown Structure (WBS) schedule database, and a React + Tailwind CSS client dashboard simulating Computer Vision photo capture analytics.
 

@@ -950,7 +950,7 @@ export default function Dashboard() {
           </div>
           <div>
             <h1 className="font-extrabold text-sm text-white tracking-tight uppercase">
-              SYNTARX AI
+              SYNTRAX
             </h1>
             <p className="text-[9px] text-blue-400 font-mono tracking-widest uppercase">Execution Intelligence</p>
           </div>
@@ -1031,7 +1031,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
               <div className="flex items-center gap-2">
                 <HardHat className="h-5 w-5 text-blue-500" />
-                <span className="font-extrabold text-sm">SYNTARX MENU</span>
+                <span className="font-extrabold text-sm">SYNTRAX MENU</span>
               </div>
               <button onClick={() => setShowMobileMenu(false)} className="text-slate-400 hover:text-slate-200">
                 <X className="h-5 w-5" />
@@ -1098,7 +1098,7 @@ export default function Dashboard() {
               
               <div className="hidden sm:flex items-center gap-2 text-slate-800">
                 <HardHat className="h-5 w-5 text-blue-600" />
-                <span className="font-extrabold text-sm uppercase tracking-tight">Syntarx CC</span>
+                <span className="font-extrabold text-sm uppercase tracking-tight">Syntrax CC</span>
               </div>
             </div>
 
@@ -2804,7 +2804,7 @@ export default function Dashboard() {
                     type="text"
                     value={(editForm as any)[field.key] || ''}
                     onChange={(e) => {
-                      setEditForm(prev => ({ ...prev, [field.key]: e.target.value }));
+                      setEditForm((prev: Partial<ReviewItem['extracted_event']>) => ({ ...prev, [field.key]: e.target.value }));
                     }}
                     className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded px-2 py-1.5 focus:border-blue-500 focus:outline-none"
                   />
